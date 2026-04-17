@@ -19,8 +19,50 @@ from dotenv import load_dotenv
 
 load_dotenv()  # reads .env file into os.environ
 
-# Initialise the Groq client once at module level (reused across calls)
-client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+# Module-level cache for the Groq client (lazy initialization)
+_groq_client = None
+
+
+def get_groq_client():
+	"""
+	Lazily initialize and return the Groq client.
+	Supports both local development (.env) and Streamlit Cloud (st.secrets).
+
+	Priority order:
+	1. Streamlit secrets (st.secrets["GROQ_API_KEY"]) — for Streamlit Cloud
+	2. Environment variable (os.environ.get("GROQ_API_KEY")) — for local .env
+
+	Raises ValueError if API key is not found in either source.
+	"""
+	global _groq_client
+
+	if _groq_client is not None:
+		return _groq_client
+
+	api_key = None
+
+	# Try Streamlit secrets first (only available in Streamlit context)
+	try:
+		import streamlit as st
+		if hasattr(st, 'secrets') and "GROQ_API_KEY" in st.secrets:
+			api_key = st.secrets["GROQ_API_KEY"]
+	except (ImportError, Exception):
+		pass
+
+	# Fall back to environment variable
+	if api_key is None:
+		api_key = os.environ.get("GROQ_API_KEY")
+
+	if not api_key:
+		raise ValueError(
+			"❌ GROQ_API_KEY not found!\n\n"
+			"Local setup: Add GROQ_API_KEY to .env file\n"
+			"Streamlit Cloud: Add secret in Settings → Secrets\n"
+			"Get a key: https://console.groq.com/keys"
+		)
+
+	_groq_client = Groq(api_key=api_key)
+	return _groq_client
 
 # Platform character limits — different platforms allow different copy lengths
 PLATFORM_SPECS = {
@@ -110,6 +152,7 @@ Do not exceed these limits. Count carefully.
     # API call to Groq / Llama 3.3
     # temperature=0.7 means slightly creative but not random
     # max_tokens=1024 is plenty for the JSON response
+    client = get_groq_client()  # Get lazily initialized client
     response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[
